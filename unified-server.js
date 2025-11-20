@@ -2141,12 +2141,11 @@ app.get("/login", (req, res) => {
         width: 100%;
         margin: 0;
         padding: 0;
-        overflow: hidden; /* 禁止全局滚动和橡皮筋效果 */
+        overflow: hidden;
         background: #f0f2f5;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
       
-      /* 核心：使用一个全屏容器来处理布局和潜在的滚动 */
       .container {
         position: absolute;
         top: 0;
@@ -2157,19 +2156,15 @@ app.get("/login", (req, res) => {
         flex-direction: column;
         align-items: center;
         justify-content: center; 
-        overflow-y: auto; /* 当高度不够时（键盘弹出），允许内部滚动 */
+        overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        
-        /* 关键优化：通过 padding-bottom 把中心点视觉上移 */
-        /* 这样表单平时会显示在屏幕偏上位置，键盘弹起时正好不容易被遮挡 */
-        padding-bottom: 20vh; 
+        padding-bottom: 20vh; /* 视觉重心上移 */
       }
 
-      /* 当屏幕高度非常小（比如横屏或键盘弹起且屏幕很小时），取消上移效果，防止顶部被切 */
       @media (max-height: 500px) {
         .container {
           padding-bottom: 0;
-          justify-content: flex-start; /* 顶端对齐 */
+          justify-content: flex-start;
           padding-top: 20px;
         }
       }
@@ -2182,7 +2177,7 @@ app.get("/login", (req, res) => {
         text-align: center;
         width: 85%;
         max-width: 360px;
-        flex-shrink: 0; /* 防止表单被压缩 */
+        flex-shrink: 0;
         transition: transform 0.3s ease;
       }
 
@@ -2194,23 +2189,59 @@ app.get("/login", (req, res) => {
         font-weight: 600;
       }
 
+      /* 新增：输入框包装器，用于定位图标 */
+      .input-wrapper {
+        position: relative;
+        width: 100%;
+        margin-bottom: 15px;
+      }
+
       input {
         width: 100%;
         padding: 14px;
-        margin-bottom: 15px;
+        /* 右边距留给小眼睛，防止文字重叠 */
+        padding-right: 45px; 
         border: 1px solid #ddd;
         border-radius: 10px;
-        font-size: 16px; /* iOS防缩放 */
+        font-size: 16px;
         outline: none;
         background: #f9f9f9;
         -webkit-appearance: none;
         transition: all 0.2s;
+        margin-bottom: 0; /* margin交给wrapper处理 */
       }
       
       input:focus {
         background: #fff;
         border-color: #007bff;
         box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+      }
+
+      /* 小眼睛图标样式 */
+      .toggle-eye {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: pointer;
+        color: #999;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-tap-highlight-color: transparent;
+        z-index: 10;
+      }
+
+      .toggle-eye svg {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       button {
@@ -2246,28 +2277,66 @@ app.get("/login", (req, res) => {
     <div class="container">
       <form action="/login" method="post">
         <h2>API Key 验证</h2>
-        <input type="password" name="apiKey" placeholder="请输入 API Key" required autofocus autocomplete="off">
+        
+        <div class="input-wrapper">
+            <input type="password" id="apiKeyInput" name="apiKey" placeholder="请输入 API Key" required autofocus autocomplete="off">
+            <!-- 这里是用 SVG 画的眼睛 -->
+            <div class="toggle-eye" id="toggleBtn">
+                <!-- 默认显示“闭眼”图标 (斜杠眼) 或者 “睁眼”图标，这里默认睁眼图标更直观表示“点击查看” -->
+                <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </div>
+        </div>
+
         <button type="submit">进入系统</button>
         ${req.query.error ? '<div class="error">验证失败，请重试</div>' : ""}
       </form>
     </div>
 
     <script>
-      // 解决 iOS 和 Android 键盘遮挡问题的终极方案
-      const input = document.querySelector('input');
-      const container = document.querySelector('.container');
+      const input = document.getElementById('apiKeyInput');
+      const toggleBtn = document.getElementById('toggleBtn');
+      
+      // SVG 图标数据
+      const eyeOpen = '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+      const eyeClosed = '<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
 
+      // 初始化图标状态：因为是password类型，所以现在的图标功能是“点击显示密码”
+      // 通常为了提示用户“这是密码”，默认显示“眼睛”（表示点击预览）或“闭眼”（表示当前是隐藏状态）
+      // 这里逻辑是：当前隐藏 -> 显示闭眼图标（代表隐藏状态） -> 点击变成睁眼。
+      // 或者：当前隐藏 -> 显示睁眼图标（代表点击动作） -> 点击变成闭眼。
+      // 我们采用更通用的：默认显示斜杠眼（闭眼），点击变睁眼。
+      toggleBtn.innerHTML = eyeClosed;
+
+      toggleBtn.addEventListener('click', (e) => {
+        // 防止点击切换时输入框失去焦点
+        e.preventDefault();
+        
+        const type = input.getAttribute('type') === 'password' ? 'text' : 'password';
+        input.setAttribute('type', type);
+        
+        // 切换图标
+        if (type === 'text') {
+            toggleBtn.innerHTML = eyeOpen;
+            toggleBtn.style.color = '#007bff'; // 激活时眼睛变蓝
+        } else {
+            toggleBtn.innerHTML = eyeClosed;
+            toggleBtn.style.color = '#999';
+        }
+
+        // 重新聚焦，因为点击div可能会丢失焦点
+        // input.focus(); 
+        // 注释掉 focus：手机上频繁唤起键盘体验不好，用户只想看一眼密码而已
+      });
+
+      // 之前的键盘遮挡优化
+      const container = document.querySelector('.container');
       input.addEventListener('focus', () => {
-        // 延时等待键盘完全弹起
         setTimeout(() => {
-          // 方法1: 滚动容器让元素居中
           input.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 300);
       });
 
-      // 针对 iOS 禁止整个页面被拖动的弹性效果，但允许 .container 内部必要的滚动
       document.body.addEventListener('touchmove', function(e) {
-        // 如果不是在 container 内部滑动，则禁止（防止背景橡皮筋）
         if (!e.target.closest('.container')) {
           e.preventDefault();
         }
