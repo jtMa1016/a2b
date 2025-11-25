@@ -1,0 +1,24 @@
+name: 🧹 清理 Actions 历史记录
+
+on:
+  # 允许手动点击按钮触发 (一键清理)
+  workflow_dispatch:
+  # 如果需要，也可以设置为每天自动清理 (例如每天凌晨0点)
+  # schedule:
+  #   - cron: '0 0 * * *'
+
+jobs:
+  del_runs:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0 # 保留多少天的记录？设为 0 表示不保留旧记录
+          keep_minimum_runs: 0 # 保留最少多少次运行？设为 0 表示全删
+          # 注意：这个 Action 默认不会删除正在运行的 Workflow (包括它自己)

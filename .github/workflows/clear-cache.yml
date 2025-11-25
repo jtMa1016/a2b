@@ -1,19 +1,46 @@
-name: Clear All Caches
+name: 🧹 暴力清空所有缓存 (API版)
 
-on:
-  workflow_dispatch: # 这是一个手动触发的按钮
+on: workflow_dispatch
 
 jobs:
   clear-cache:
     runs-on: ubuntu-latest
     permissions:
-      actions: write  # 必须给这个权限才能删缓存
+      actions: write  # 必须开启写入权限
     steps:
-      - name: Delete all caches
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "正在获取缓存列表..."
-          # 使用 GitHub CLI 强制删除所有缓存
-          gh cache delete --all || echo "没有发现缓存或删除失败（可能已经空了）"
-          echo "清理完成！"
+      - name: Use GitHub API to delete caches
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("🔎 开始扫描并清除所有缓存...");
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // 只要还有缓存，就一直循环删
+            while(true) {
+                const { data: { actions_caches } } = await github.rest.actions.getActionsCacheList({
+                  owner,
+                  repo,
+                  per_page: 100
+                });
+                
+                if (actions_caches.length === 0) {
+                  console.log("🎉 恭喜！所有缓存已彻底清空！");
+                  break;
+                }
+                
+                console.log(`⚠️ 发现 ${actions_caches.length} 个顽固缓存，准备执行删除...`);
+                
+                for (const cache of actions_caches) {
+                  try {
+                    await github.rest.actions.deleteActionsCacheById({
+                      owner,
+                      repo,
+                      cache_id: cache.id
+                    });
+                    console.log(`🗑️ 已粉碎缓存: ${cache.key} (ID: ${cache.id})`);
+                  } catch (error) {
+                    console.log(`❌ 删除失败 (ID: ${cache.id}): ${error.message}`);
+                  }
+                }
+            }

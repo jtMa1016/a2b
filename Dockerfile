@@ -1,63 +1,64 @@
-# 1. 使用 slim 版本作为基础
-FROM node:18-slim
-
+# ==========================================
+# 第一阶段：构建层 (Builder)
+#这一层用来干脏活累活，体积大点没关系，最后会被丢弃
+# ==========================================
+FROM node:18-slim AS builder
 WORKDIR /app
 
-# 【核心优化 1】设置环境变量，禁止 Puppeteer/Playwright 自动下载浏览器
-# 既然你手动下载了 Camoufox，就绝对不要让 npm 再下载 Chrome 了，这里能省下 500MB+
+# 安装下载和解压工具
+RUN apt-get update && apt-get install -y curl tar
+
+# 1. 下载 Camoufox
+ARG CAMOUFOX_URL
+RUN if [ -z "$CAMOUFOX_URL" ]; then echo "Error: URL is empty"; exit 1; fi && \
+    curl -sSL ${CAMOUFOX_URL} -o camoufox.tar.gz && \
+    tar -xzf camoufox.tar.gz && \
+    chmod +x camoufox-linux/camoufox
+
+# 2. 安装 NPM 依赖
+COPY package*.json ./
+# 禁止自动下载浏览器
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_SKIP_DOWNLOAD=true \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true \
-    # 告诉 camoufox 的 npm 包（如果有的话）不要自动下载
-    CAMOUFOX_SKIP_DOWNLOAD=true \
-    NODE_ENV=production
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+# 只安装依赖，不要任何开发工具
+RUN npm install --omit=dev
 
-# 2. 安装系统依赖
-# 【核心优化 2】添加 --no-install-recommends
-# 这可以避免安装几百 MB 的文档、图标、壁纸等无用垃圾
+# ==========================================
+# 第二阶段：运行层 (Final)
+# 这是一个全新的、干干净净的镜像
+# ==========================================
+FROM node:18-slim
+WORKDIR /app
+
+# 1. 安装运行浏览器必须的系统库
+# 这些是 Camoufox 运行必须的，无法省略，但体积可控
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 libatk-bridge2.0-0 libatk1.0-0 libc6 libcairo2 libcups2 \
-    libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libgcc1 libglib2.0-0 \
-    libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libpangocairo-1.0-0 \
-    libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 \
-    libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 \
-    libxtst6 lsb-release wget xdg-utils xvfb \
-    && apt-get clean \
+    ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 \
+    libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 \
+    libfontconfig1 libgbm1 libgcc1 libglib2.0-0 libgtk-3-0 libnspr4 \
+    libnss3 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 \
+    libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 \
+    libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 \
+    lsb-release wget xdg-utils xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. 拷贝 package.json 并安装依赖
+# 2. 【核心魔法】只从上一阶段拷贝结果，不拷贝过程！
+# 把整理好的 node_modules 拿过来 (约 300MB-1GB)
+COPY --from=builder /app/node_modules ./node_modules
+# 把解压好的 camoufox 拿过来 (约 300-500MB)
+COPY --from=builder /app/camoufox-linux ./camoufox-linux
+# 拷贝 package.json
 COPY package*.json ./
 
-# 【核心优化 3】安装完依赖后，立即清理 npm 缓存
-# --omit=dev 确保不安装开发依赖
-RUN npm install --omit=dev && npm cache clean --force
-
-# 4. 下载 Camoufox (保持原逻辑，这是必须的体积)
-ARG CAMOUFOX_URL
-# 增加 check，防止 URL 为空导致构建出一个只有空壳但层级很大的镜像
-RUN if [ -z "$CAMOUFOX_URL" ]; then echo "Error: CAMOUFOX_URL is empty" && exit 1; fi && \
-    curl -sSL ${CAMOUFOX_URL} -o camoufox-linux.tar.gz && \
-    tar -xzf camoufox-linux.tar.gz && \
-    rm camoufox-linux.tar.gz && \
-    chmod +x /app/camoufox-linux/camoufox
-
-# 5. 拷贝代码
+# 3. 拷贝你的代码文件
 COPY unified-server.js black-browser.js ./
 
-# 6. 权限设置
+# 4. 权限设置
 RUN mkdir -p ./auth && chown -R node:node /app
 
-# 切换用户
+# 5. 启动配置
 USER node
-
-# 暴露端口
 EXPOSE 7860 9998
-
-# 环境变量
 ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox-linux/camoufox
-
-# 启动
 CMD ["node", "unified-server.js"]
