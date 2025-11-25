@@ -2629,22 +2629,26 @@ class ProxyServerSystem extends EventEmitter {
       )}] (总数: ${invalidIndices.length})
             </pre>
         </div>
-        <div id="log-section" style="margin-top: 2em;">
-            <h2>实时日志 (最近 ${logs.length} 条)</h2>
-            <pre id="log-container">${logs.join("\n")}</pre>
-        </div>
+        
+        <!-- 操作面板 (已移动到上方) -->
         <div id="actions-section" style="margin-top: 2em;">
             <h2>操作面板</h2>
             <div class="action-group">
                 <select id="accountIndexSelect">${accountOptionsHtml}</select>
                 <button onclick="switchSpecificAccount()">切换账号</button>
                 <button onclick="toggleStreamingMode()">切换流模式</button>
-                <!-- [修改] 移除了内联样式，统一使用 CSS 蓝色 -->
                 <button class="warning-btn" onclick="toggleReasoning()">强制开启OAI格式推理</button>
                 <button class="warning-btn" onclick="toggleNativeReasoning()">强制开启原生格式推理</button>
                 <button class="purple-btn" onclick="configureResume()">设置截断自动续写</button>
             </div>
         </div>
+
+        <!-- 实时日志 (已移动到下方) -->
+        <div id="log-section" style="margin-top: 2em;">
+            <h2>实时日志 (最近 ${logs.length} 条)</h2>
+            <pre id="log-container">${logs.join("\n")}</pre>
+        </div>
+
         </div>
         <script>
         let currentResumeLimit = 3;
