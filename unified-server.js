@@ -329,7 +329,7 @@ class BrowserManager {
 
       this.logger.info(`[Browser] 正在检查 Cookie 同意横幅...`);
       try {
-        const agreeButton = this.page.locator('button:text("Agree")');
+        const agreeButton = this.page.locator('button:text("Agree")').first();
         await agreeButton.waitFor({ state: "visible", timeout: 10000 });
         this.logger.info(
           `[Browser] ✅ 发现 Cookie 同意横幅，正在点击 "Agree"...`
@@ -344,7 +344,7 @@ class BrowserManager {
       try {
         const gotItButton = this.page.locator(
           'div.dialog button:text("Got it")'
-        );
+        ).first();
         await gotItButton.waitFor({ state: "visible", timeout: 15000 });
         this.logger.info(`[Browser] ✅ 发现 "Got it" 弹窗，正在点击...`);
         await gotItButton.click({ force: true });
@@ -355,7 +355,7 @@ class BrowserManager {
 
       this.logger.info(`[Browser] 正在检查新手引导...`);
       try {
-        const closeButton = this.page.locator('button[aria-label="Close"]');
+        const closeButton = this.page.locator('button[aria-label="Close"]').first();
         await closeButton.waitFor({ state: "visible", timeout: 15000 });
         this.logger.info(`[Browser] ✅ 发现新手引导弹窗，正在点击关闭按钮...`);
         await closeButton.click({ force: true });
@@ -383,65 +383,30 @@ class BrowserManager {
       try {
         await this.page.waitForSelector('button:has-text("Code")', { state: 'attached', timeout: 15000 });
       } catch (e) {
-        this.logger.warn("等待 Code 按钮 DOM 出现超时，尝试直接盲点...");
+        this.logger.warn("等待 Code 按钮 DOM 出现超时，尝试直接点击...");
       }
 
+      let codeClicked = false;
       for (let i = 1; i <= 5; i++) {
         try {
-          this.logger.info(`  [尝试 ${i}/5] 执行多策略点击...`);
+          this.logger.info(`  [尝试 ${i}/5] 正在尝试点击 "Code" 按钮...`);
 
-          // --- 策略 A: Playwright 暴力点击 ---
-          let clicked = false;
-          try {
-            const codeBtn = this.page.locator('button:text("Code")').first();
-            if ((await codeBtn.count()) > 0) {
-              await codeBtn.click({ force: true, timeout: 3000 });
-              this.logger.info("  ✅ (策略A) Playwright 强制点击成功！");
-              clicked = true;
-            }
-          } catch (e) {}
-
-          if (clicked) break;
-
-          // --- 策略 B: 原生 JS 点击 ---
-          const jsResult = await this.page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll("button"));
-            const target = buttons.find((b) => b.innerText?.trim() === "Code");
-            if (target) {
-              target.click();
-              return true;
-            }
-            return false;
-          });
-
-          if (jsResult) {
-            this.logger.info("  ✅ (策略B) 原生 JS 点击触发成功！");
-            break;
+          // --- 仅使用 Playwright 强制点击 ---
+          const codeBtn = this.page.locator('button:text("Code")').first();
+          if ((await codeBtn.count()) > 0) {
+              await codeBtn.click({ force: true, timeout: 5000 });
+              this.logger.info("  ✅ 'Code' 按钮点击成功！");
+              codeClicked = true;
+              break;
+          } else {
+              throw new Error("找不到 Code 按钮元素");
           }
-
-          // --- 策略 C: 鼠标事件派发 ---
-          const dispatchResult = await this.page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll("button"));
-            const target = buttons.find((b) => b.innerText?.trim() === "Code");
-            if (target) {
-              const evt = new MouseEvent("click", {
-                bubbles: true,
-                cancelable: true,
-                view: window,
-              });
-              target.dispatchEvent(evt);
-              return true;
-            }
-            return false;
-          });
-
-          if (dispatchResult) {
-            this.logger.info("  ✅ (策略C) 鼠标事件派发成功！");
-            break;
-          }
-
+        } catch (error) {
+          this.logger.warn(
+            `  [尝试 ${i}/5] 点击异常: ${error.message.split("\n")[0]}，正在清理环境重试...`
+          );
+          
           // 失败处理：清理环境
-          this.logger.warn(`  [尝试 ${i}/5] 点击未生效，清理环境后重试...`);
           await this.page.evaluate(() => {
             document
               .querySelectorAll(".cdk-overlay-backdrop, .cdk-overlay-container")
@@ -450,19 +415,11 @@ class BrowserManager {
           await this.page.waitForTimeout(1000);
 
           if (i === 5) {
-            throw new Error("5次尝试均无法点击 Code 按钮");
-          }
-        } catch (error) {
-          this.logger.warn(
-            `  [尝试 ${i}/5] 异常: ${error.message.split("\n")[0]}`
-          );
-
-          if (i === 5) {
             this.logger.error(
               "❌ [严重错误] 前置检查已通过，但仍无法点击按钮，可能是 Google UI 变更。"
             );
             
-            // 尝试截图并捕获截图失败的错误
+            // 尝试截图
             try {
               const screenshotPath = path.join(
                 __dirname,
@@ -473,11 +430,7 @@ class BrowserManager {
                 fullPage: true,
               });
               this.logger.info(`📷 调试截图已保存: ${screenshotPath}`);
-            } catch (screenshotError) {
-              this.logger.warn(
-                `⚠️ 无法保存调试截图 (可能是容器无写入权限): ${screenshotError.message}`
-              );
-            }
+            } catch (screenshotError) {}
 
             throw new Error("UI 交互失败：找不到 Code 按钮。");
           }
@@ -510,7 +463,7 @@ class BrowserManager {
       await this.page.waitForTimeout(250);
 
       this.logger.info("[Browser] (步骤3/5) 编辑器已显示，聚焦并粘贴脚本...");
-      await editorContainerLocator.click({ timeout: 30000 });
+      await editorContainerLocator.click({ force: true, timeout: 30000 });
 
       await this.page.evaluate(
         (text) => navigator.clipboard.writeText(text),
@@ -523,7 +476,7 @@ class BrowserManager {
       this.logger.info(
         '[Browser] (步骤5/5) 正在点击 "Preview" 按钮以使脚本生效...'
       );
-      await this.page.locator('button:text("Preview")').click();
+      await this.page.locator('button:text("Preview")').first().click({ force: true });
       this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
       this.currentAuthIndex = authIndex;
       this.logger.info("==================================================");
@@ -765,9 +718,6 @@ class RequestHandler {
     this.browserManager = browserManager;
     this.config = config;
     this.authSource = authSource;
-    this.maxRetries = this.config.maxRetries;
-    this.retryDelay = this.config.retryDelay;
-    this.failureCount = 0;
     this.usageCount = 0;
     
     // [修改] 新增并发控制状态
@@ -833,7 +783,6 @@ class RequestHandler {
 
       try {
         await this.browserManager.switchAccount(nextAuthIndex);
-        this.failureCount = 0;
         this.usageCount = 0;
         this.logger.info(
           `✅ [Auth] 成功切换到账号 #${this.currentAuthIndex}，计数已重置。`
@@ -849,9 +798,8 @@ class RequestHandler {
         try {
           await this.browserManager.launchOrSwitchContext(previousAuthIndex);
           this.logger.info(`✅ [Auth] 成功回退到账号 #${previousAuthIndex}！`);
-          this.failureCount = 0;
           this.usageCount = 0;
-          this.logger.info("[Auth] 失败和使用计数已在回退成功后重置为0。");
+          this.logger.info("[Auth] 使用计数已在回退成功后重置为0。");
           return {
             success: false,
             fallback: true,
@@ -893,7 +841,6 @@ class RequestHandler {
     try {
       this.logger.info(`🔄 [Auth] 开始切换到指定账号 #${targetIndex}...`);
       await this.browserManager.switchAccount(targetIndex);
-      this.failureCount = 0;
       this.usageCount = 0;
       this.pendingSwitch = false; // 手动切换成功后，清除可能存在的自动切换标记
       this.logger.info(
@@ -912,63 +859,44 @@ class RequestHandler {
   }
 
   async _handleRequestFailureAndSwitch(errorDetails, res) {
-    if (this.config.failureThreshold > 0) {
-      this.failureCount++;
-      this.logger.warn(
-        `⚠️ [Auth] 请求失败 - 失败计数: ${this.failureCount}/${this.config.failureThreshold} (当前账号索引: ${this.currentAuthIndex})`
-      );
-    }
-
     const isImmediateSwitch = this.config.immediateSwitchStatusCodes.includes(
       errorDetails.status
     );
-    const isThresholdReached =
-      this.config.failureThreshold > 0 &&
-      this.failureCount >= this.config.failureThreshold;
 
-    if (isImmediateSwitch || isThresholdReached) {
-      if (isImmediateSwitch) {
-        this.logger.warn(
-          `🔴 [Auth] 收到状态码 ${errorDetails.status}，触发立即切换账号...`
-        );
-      } else {
-        this.logger.warn(
-          `🔴 [Auth] 达到失败阈值 (${this.failureCount}/${this.config.failureThreshold})！准备切换账号...`
-        );
+    if (isImmediateSwitch) {
+      this.logger.warn(
+        `🔴 [Auth] 收到状态码 ${errorDetails.status}，触发立即切换账号...`
+      );
+
+      // [核心修改]：先给用户返回错误，不再让用户等待切换过程
+      const userMsg = `[System] 检测到上游服务限制 (Code ${errorDetails.status})，正在自动切换账号，请稍后重试。`;
+
+      if (res && !res.headersSent) {
+          this.logger.info(`[Auth] ⚡ 在切换前立即响应客户端请求...`);
+          // 使用 503 Service Unavailable，因为我们正在维护(切换)中
+          this._sendErrorResponse(res, 503, userMsg);
+          if (!res.writableEnded) res.end();
+      } else if (res && !res.writableEnded) {
+          // 如果是流式中间断开，尝试发个 chunk
+           this._sendErrorChunkToClient(res, userMsg);
+           res.end();
       }
 
+      // [核心修改]：响应发送完毕后，再并在后台执行切换
+      // 我们这里使用 await 来确保 isSystemBusy 状态的正确锁定，虽然对客户端来说响应已经结束了。
       try {
         const result = await this._switchToNextAuth();
-        
-        // [修改] 根据切换结果决定返回给客户端的信息
         if (result.success) {
-             const msg = `✅ 检测到请求异常，已自动切换到新账号 #${result.newIndex}。请重试请求。`;
-             this.logger.info(`[Auth] ${msg}`);
-             // 切换成功通常不需要发 error chunk，除非是在流中间断开，这里选择记录日志
+             this.logger.info(`[Auth] ✅ 后台切换成功: 新账号 #${result.newIndex}`);
         } else if (result.fallback) {
-             const successMessage = `🔄 目标账户无效，已自动回退至账号 #${this.currentAuthIndex}。`;
-             this.logger.info(`[Auth] ${successMessage}`);
-             if (res) this._sendErrorChunkToClient(res, successMessage);
+             this.logger.info(`[Auth] 🔄 后台切换(回退)成功: 账号 #${this.currentAuthIndex}`);
         }
-
       } catch (error) {
-        let userMessage = `❌ 致命错误：发生未知切换错误: ${error.message}`;
-
-        if (error.message.includes("Only one account is available")) {
-          userMessage = "❌ 切换失败：只有一个可用账号。";
-          this.logger.info("[Auth] 只有一个可用账号，失败计数已重置。");
-          this.failureCount = 0;
-        } else if (error.message.includes("回退失败原因")) {
-          userMessage = `❌ 致命错误：自动切换和紧急回退均失败，服务可能已中断，请检查日志！`;
-        } else if (error.message.includes("切换到账号")) {
-          userMessage = `⚠️ 自动切换失败：已自动回退到账号 #${this.currentAuthIndex}，请检查目标账号是否存在问题。`;
-        }
-
-        this.logger.error(`[Auth] 后台账号切换任务最终失败: ${error.message}`);
-        if (res) this._sendErrorChunkToClient(res, userMessage);
+        this.logger.error(`[Auth] ❌ 后台切换失败: ${error.message}`);
       }
-      return;
+      return true; // 表示已处理了错误和响应
     }
+    return false; // 表示未触发切换
   }
 
   // [修改] Google 原生请求处理 (支持 graceful switch)
@@ -1146,7 +1074,10 @@ class RequestHandler {
           `[Adapter] 收到来自浏览器的错误，将触发切换逻辑。状态码: ${initialMessage.status}, 消息: ${initialMessage.message}`
         );
 
-        await this._handleRequestFailureAndSwitch(initialMessage, res);
+        // [修改] 传递 res 以便立即响应
+        const handled = await this._handleRequestFailureAndSwitch(initialMessage, res);
+        
+        if (handled) return; // 如果已处理切换，直接返回，不再发送多余错误
 
         if (isOpenAIStream) {
           if (!res.writableEnded) {
@@ -1161,13 +1092,6 @@ class RequestHandler {
           );
         }
         return; 
-      }
-
-      if (this.failureCount > 0) {
-        this.logger.info(
-          `✅ [Auth] OpenAI接口请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
-        );
-        this.failureCount = 0;
       }
       
       let capturedFinishReason = "UNKNOWN";
@@ -1457,91 +1381,60 @@ async processModelListRequest(req, res) {
     }, 3000);
 
     try {
-      let lastMessage,
-        requestFailed = false;
+      let lastMessage;
 
-      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-        if (attempt > 1) {
-          this.logger.info(
-            `[Request] 请求尝试 #${attempt}/${this.maxRetries}...`
-          );
-        }
-        this._forwardRequest(proxyRequest);
-        try {
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error("Response from browser timed out after 300 seconds")
-                ),
-              300000
-            )
-          );
-          lastMessage = await Promise.race([
-            messageQueue.dequeue(),
-            timeoutPromise,
-          ]);
-        } catch (timeoutError) {
-          this.logger.error(`[Request] 致命错误: ${timeoutError.message}`);
-          lastMessage = {
-            event_type: "error",
-            status: 504,
-            message: timeoutError.message,
-          };
-        }
-
-        if (lastMessage.event_type === "error") {
-          if (
-            !(
-              lastMessage.message &&
-              lastMessage.message.includes("The user aborted a request")
-            )
-          ) {
-            this.logger.warn(
-              `[Request] 尝试 #${attempt} 失败: 收到 ${
-                lastMessage.status || "未知"
-              } 错误。 - ${lastMessage.message}`
-            );
-          }
-
-          if (attempt < this.maxRetries) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, this.retryDelay)
-            );
-            continue;
-          }
-          requestFailed = true;
-        }
-        break;
+      // [修改] 移除循环重试逻辑，仅执行一次
+      this._forwardRequest(proxyRequest);
+      
+      try {
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error("Response from browser timed out after 300 seconds")
+              ),
+            300000
+          )
+        );
+        lastMessage = await Promise.race([
+          messageQueue.dequeue(),
+          timeoutPromise,
+        ]);
+      } catch (timeoutError) {
+        this.logger.error(`[Request] 致命错误: ${timeoutError.message}`);
+        lastMessage = {
+          event_type: "error",
+          status: 504,
+          message: timeoutError.message,
+        };
       }
 
-      if (requestFailed) {
+      if (lastMessage.event_type === "error") {
         if (
           lastMessage.message &&
           lastMessage.message.includes("The user aborted a request")
         ) {
           this.logger.info(
-            `[Request] 请求 #${proxyRequest.request_id} 已由用户妥善取消，不计入失败统计。`
+            `[Request] 请求 #${proxyRequest.request_id} 已由用户妥善取消。`
           );
         } else {
           this.logger.error(
-            `[Request] 所有 ${this.maxRetries} 次重试均失败，将计入失败统计。`
+            `[Request] 请求失败，浏览器端返回错误: ${lastMessage.message}`
           );
-          await this._handleRequestFailureAndSwitch(lastMessage, res);
-          this._sendErrorChunkToClient(
-            res,
-            `请求最终失败: ${lastMessage.message}`
-          );
+          
+          // [修改] 传递 res
+          const handled = await this._handleRequestFailureAndSwitch(lastMessage, res);
+          
+          if (!handled) {
+            this._sendErrorChunkToClient(
+                res,
+                `请求失败: ${lastMessage.message}`
+            );
+          }
         }
         return;
       }
 
-      if (proxyRequest.is_generative && this.failureCount > 0) {
-        this.logger.info(
-          `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
-        );
-        this.failureCount = 0;
-      }
       const dataMessage = await messageQueue.dequeue();
       const endMessage = await messageQueue.dequeue();
       if (dataMessage.data) {
@@ -1586,8 +1479,12 @@ async processModelListRequest(req, res) {
           `[Request] 请求 #${proxyRequest.request_id} 已被用户妥善取消，不计入失败统计。`
         );
       } else {
-        this.logger.error(`[Request] 请求失败，将计入失败统计。`);
-        await this._handleRequestFailureAndSwitch(headerMessage, null);
+        this.logger.error(`[Request] 请求失败。`);
+        
+        // [修改] 传递 res，处理失败直接返回
+        const handled = await this._handleRequestFailureAndSwitch(headerMessage, res);
+        if (handled) return;
+
         return this._sendErrorResponse(
           res,
           headerMessage.status,
@@ -1596,13 +1493,6 @@ async processModelListRequest(req, res) {
       }
       if (!res.writableEnded) res.end();
       return;
-    }
-
-    if (proxyRequest.is_generative && this.failureCount > 0) {
-      this.logger.info(
-        `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
-      );
-      this.failureCount = 0;
     }
 
     this._setResponseHeaders(res, headerMessage, true); 
@@ -1671,7 +1561,10 @@ async processModelListRequest(req, res) {
           this.logger.error(
             `[Request] 浏览器端返回错误: ${headerMessage.message}`
           );
-          await this._handleRequestFailureAndSwitch(headerMessage, null);
+          
+          // [修改] 传递 res
+          const handled = await this._handleRequestFailureAndSwitch(headerMessage, res);
+          if (handled) return;
         }
         return this._sendErrorResponse(
           res,
@@ -1690,13 +1583,6 @@ async processModelListRequest(req, res) {
         if (message.event_type === "chunk" && message.data) {
           fullBody += message.data;
         }
-      }
-
-      if (proxyRequest.is_generative && this.failureCount > 0) {
-        this.logger.info(
-          `✅ [Auth] 非流式生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
-        );
-        this.failureCount = 0;
       }
 
       try {
@@ -2045,13 +1931,10 @@ class ProxyServerSystem extends EventEmitter {
       host: "0.0.0.0",
       wsPort: 9998,
       streamingMode: "real",
-      failureThreshold: 3,
       switchOnUses: 40,
-      maxRetries: 1,
-      retryDelay: 2000,
       browserExecutablePath: null,
       apiKeys: [],
-      immediateSwitchStatusCodes: [429, 503],
+      immediateSwitchStatusCodes: [401, 403, 429],
       apiKeySource: "未设置",
     };
 
@@ -2060,18 +1943,9 @@ class ProxyServerSystem extends EventEmitter {
     if (process.env.HOST) config.host = process.env.HOST;
     if (process.env.STREAMING_MODE)
       config.streamingMode = process.env.STREAMING_MODE;
-    if (process.env.FAILURE_THRESHOLD)
-      config.failureThreshold =
-        parseInt(process.env.FAILURE_THRESHOLD, 10) || config.failureThreshold;
     if (process.env.SWITCH_ON_USES)
       config.switchOnUses =
         parseInt(process.env.SWITCH_ON_USES, 10) || config.switchOnUses;
-    if (process.env.MAX_RETRIES)
-      config.maxRetries =
-        parseInt(process.env.MAX_RETRIES, 10) || config.maxRetries;
-    if (process.env.RETRY_DELAY)
-      config.retryDelay =
-        parseInt(process.env.RETRY_DELAY, 10) || config.retryDelay;
     if (process.env.CAMOUFOX_EXECUTABLE_PATH)
       config.browserExecutablePath = process.env.CAMOUFOX_EXECUTABLE_PATH;
     if (process.env.API_KEYS) {
@@ -2131,21 +2005,12 @@ class ProxyServerSystem extends EventEmitter {
       }`
     );
     this.logger.info(
-      `  失败计数切换: ${
-        this.config.failureThreshold > 0
-          ? `失败${this.config.failureThreshold} 次后切换`
-          : "已禁用"
-      }`
-    );
-    this.logger.info(
       `  立即切换报错码: ${
         this.config.immediateSwitchStatusCodes.length > 0
           ? this.config.immediateSwitchStatusCodes.join(", ")
           : "已禁用"
       }`
     );
-    this.logger.info(`  单次请求最大重试: ${this.config.maxRetries}次`);
-    this.logger.info(`  重试间隔: ${this.config.retryDelay}ms`);
     this.logger.info(`  API 密钥来源: ${this.config.apiKeySource}`); 
     this.logger.info(
       "============================================================="
@@ -2379,63 +2244,7 @@ class ProxyServerSystem extends EventEmitter {
       input:focus { background: #fff; border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(0,122,255,0.1); }
       .eye-btn {
         position: absolute; right: 15px; top: 50%; transform: translateY(-50%);
-        cursor: pointer; color: #8e8e93; display: flex;
-      }
-      button {
-        width: 100%; padding: 16px;
-        background: var(--primary-color);
-        color: white; border: none; border-radius: 12px;
-        font-size: 16px; font-weight: 600;
-        cursor: pointer; transition: opacity 0.2s;
-      }
-      button:hover { opacity: 0.9; }
-      .error-msg {
-        color: #ff3b30; background: #fff2f2;
-        padding: 10px; border-radius: 8px; margin-top: 20px; font-size: 14px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="login-card">
-      <form action="/login" method="post">
-        <h2>验证身份</h2>
-        <div class="input-group">
-            <input type="password" id="apiKeyInput" name="apiKey" placeholder="输入 API Key" required>
-            <div class="eye-btn" id="toggleBtn">
-                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            </div>
-        </div>
-        <button type="submit">登 录</button>
-        ${req.query.error ? '<div class="error-msg">API Key 无效</div>' : ""}
-      </form>
-    </div>
-    <script>
-      const input = document.getElementById('apiKeyInput');
-      const btn = document.getElementById('toggleBtn');
-      btn.onclick = () => {
-        const isPwd = input.type === 'password';
-        input.type = isPwd ? 'text' : 'password';
-        btn.style.color = isPwd ? '#007aff' : '#8e8e93';
-      }
-    </script>
-  </body>
-  </html>`;
-  res.send(loginHtml);
-});
-    app.post("/login", (req, res) => {
-      const { apiKey } = req.body;
-      if (apiKey && this.config.apiKeys.includes(apiKey)) {
-        req.session.isAuthenticated = true;
-        res.redirect("/");
-      } else {
-        res.redirect("/login?error=1");
-      }
-    });
-
-    // ==========================================================
-    // Section 3: 状态页面 (Modern UI)
-    // ==========================================================
-    app.get("/", isAuthenticated, (req, res) => {
+        cursor: pointer; color isAuthenticated, (req, res) => {
       const statusHtml = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -2785,7 +2594,7 @@ class ProxyServerSystem extends EventEmitter {
                 if(s.resumeLimit > 0) document.getElementById('resumeLimitInput').value = s.resumeLimit;
 
                 document.getElementById('currentAccountBadge').textContent = '#' + s.currentAuthIndex;
-                document.getElementById('usageStats').textContent = '使用: ' + s.usageCount + ' | 失败: ' + s.failureCount;
+                document.getElementById('usageStats').textContent = '使用: ' + s.usageCount;
 
                 const selector = document.getElementById('accountSelector');
                 // [修复1] 防闪烁：只有当下拉框没有被聚焦（用户没在操作）时才更新
@@ -2868,9 +2677,6 @@ class ProxyServerSystem extends EventEmitter {
           currentAuthIndex: requestHandler.currentAuthIndex,
           usageCount: `${requestHandler.usageCount} / ${
             config.switchOnUses > 0 ? config.switchOnUses : "N/A"
-          }`,
-          failureCount: `${requestHandler.failureCount} / ${
-            config.failureThreshold > 0 ? config.failureThreshold : "N/A"
           }`,
           initialIndices: `[${initialIndices.join(", ")}] (总数: ${
             initialIndices.length

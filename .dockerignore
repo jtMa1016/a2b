@@ -7,10 +7,6 @@ Dockerfile
 app.env
 deploy.sh
 
-LICENSE
-README.md
-
-node_modules
-npm-debug.log
-
 save-auth.js
+
+LICENSE
