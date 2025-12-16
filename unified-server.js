@@ -519,73 +519,74 @@ class BrowserManager {
     this._startBackgroundWakeup();
   }
 
-// ===================================================================================
-// [修改] 后台常驻唤醒守护 (V5 最终版: 正则精确匹配 + 永久轮询)
-// ===================================================================================
-async _startBackgroundWakeup() {
-  // 1. 启动缓冲：给页面一点初始化时间
-  await new Promise(r => setTimeout(r, 5000));
-  
-  // 安全检查
-  if (!this.page || this.page.isClosed()) return;
+  // ===================================================================================
+  // [修改] 后台常驻唤醒守护 (V5 最终版: 正则精确匹配 + 永久轮询)
+  // ===================================================================================
+  async _startBackgroundWakeup() {
+    // 1. 启动缓冲：给页面一点初始化时间
+    await new Promise(r => setTimeout(r, 5000));
+    
+    // 安全检查
+    if (!this.page || this.page.isClosed()) return;
 
-  this.logger.info('[Browser] (后台任务) 启动常驻唤醒守护进程 (监听 Launch 按钮)...');
+    this.logger.info('[Browser] (后台任务) 启动常驻唤醒守护进程 (监听 Launch 按钮)...');
 
-  // 2. 核心逻辑：变成死循环守护进程，只要浏览器没关，就一直运行
-  while (this.page && !this.page.isClosed()) {
-      try {
-          // --- A. 顺手清理干扰弹窗 (低频操作) ---
-          try {
-              // 处理 "Got it"
-              const gotIt = this.page.locator('button:has-text("Got it")').first();
-              // 使用极短超时检测，不卡主流程
-              if (await gotIt.isVisible({ timeout: 100 })) { 
-                  await gotIt.click({ force: true });
-              }
-              
-              // 处理遮罩层 (直接移除 DOM，防止挡住按钮)
-              await this.page.evaluate(() => {
-                  const overlays = document.querySelectorAll('.cdk-overlay-backdrop');
-                  overlays.forEach(el => el.remove());
-              });
-          } catch (e) {
-              // 忽略清理过程中的错误
-          }
+    // 2. 核心逻辑：变成死循环守护进程，只要浏览器没关，就一直运行
+    while (this.page && !this.page.isClosed()) {
+        try {
+            // --- A. 顺手清理干扰弹窗 (低频操作) ---
+            try {
+                // 处理 "Got it"
+                const gotIt = this.page.locator('button:has-text("Got it")').first();
+                // 使用极短超时检测，不卡主流程
+                if (await gotIt.isVisible({ timeout: 100 })) { 
+                    await gotIt.click({ force: true });
+                }
+                
+                // 处理遮罩层 (直接移除 DOM，防止挡住按钮)
+                await this.page.evaluate(() => {
+                    const overlays = document.querySelectorAll('.cdk-overlay-backdrop');
+                    overlays.forEach(el => el.remove());
+                });
+            } catch (e) {
+                // 忽略清理过程中的错误
+            }
 
-          // --- B. 精确查找 Launch 按钮 ---
-          
-          // [关键修复] 使用正则精确匹配
-          // 排除右上角 "rocket_launch" 图标 (因为它包含 "launch")
-          // 只匹配纯文本 "Launch" 或 "Launch!" (忽略大小写和空格)
-          const launchBtn = this.page.locator('button', { hasText: /^\s*Launch!?\s*$/i }).first();
+            // --- B. 精确查找 Launch 按钮 ---
+            
+            // [关键修复] 使用正则精确匹配
+            // 排除右上角 "rocket_launch" 图标 (因为它包含 "launch")
+            // 只匹配纯文本 "Launch" 或 "Launch!" (忽略大小写和空格)
+            const launchBtn = this.page.locator('button', { hasText: /^\s*Launch!?\s*$/i }).first();
 
-          // 检测是否存在 (200ms 快速扫视)
-          if (await launchBtn.isVisible({ timeout: 200 })) {
-              this.logger.warn('⚠️ [Browser] (后台任务) 检测到应用休眠，正在点击 Launch 唤醒...');
-              
-              // 执行点击
-              await launchBtn.click({ force: true, timeout: 5000 });
-              
-              // 点击后等待一会儿，让 App 重新加载/反应
-              await this.page.waitForTimeout(3000);
-              this.logger.info('[Browser] (后台任务) 唤醒点击完成，继续监控...');
-          } else {
-              // --- C. 没发现按钮，休息 2 秒再看 ---
-              // 这里控制轮询频率，2秒一次既及时又不占资源
-              await this.page.waitForTimeout(2000);
-          }
+            // 检测是否存在 (200ms 快速扫视)
+            if (await launchBtn.isVisible({ timeout: 200 })) {
+                this.logger.warn('⚠️ [Browser] (后台任务) 检测到应用休眠，正在点击 Launch 唤醒...');
+                
+                // 执行点击
+                await launchBtn.click({ force: true, timeout: 5000 });
+                
+                // 点击后等待一会儿，让 App 重新加载/反应
+                await this.page.waitForTimeout(3000);
+                this.logger.info('[Browser] (后台任务) 唤醒点击完成，继续监控...');
+            } else {
+                // --- C. 没发现按钮，休息 2 秒再看 ---
+                // 这里控制轮询频率，2秒一次既及时又不占资源
+                await this.page.waitForTimeout(2000);
+            }
 
-      } catch (e) {
-          // 捕获循环内的所有异常，防止守护进程因为页面刷新或断开而崩溃
-          // 如果页面真的关了，循环条件会在下一次迭代自动退出
-          if (this.page && this.page.isClosed()) break;
-          
-          // 发生未知错误时，稍微冷却一下再重试
-          await this.page.waitForTimeout(2000); 
-      }
+        } catch (e) {
+            // 捕获循环内的所有异常，防止守护进程因为页面刷新或断开而崩溃
+            // 如果页面真的关了，循环条件会在下一次迭代自动退出
+            if (this.page && this.page.isClosed()) break;
+            
+            // 发生未知错误时，稍微冷却一下再重试
+            await this.page.waitForTimeout(2000); 
+        }
+    }
+    
+    this.logger.info('[Browser] (后台任务) 页面已关闭，唤醒守护进程停止。');
   }
-  
-  this.logger.info('[Browser] (后台任务) 页面已关闭，唤醒守护进程停止。');
 }
 // ===================================================================================
 // PROXY SERVER MODULE
