@@ -1682,41 +1682,6 @@ async processModelListRequest(req, res) {
       }
 
       try {
-        let parsedBody = JSON.parse(fullBody);
-        let needsReserialization = false;
-
-        const candidate = parsedBody.candidates?.[0];
-        if (candidate?.content?.parts) {
-          const imagePartIndex = candidate.content.parts.findIndex(
-            (p) => p.inlineData
-          );
-
-          if (imagePartIndex > -1) {
-            this.logger.info(
-              "[Proxy] 检测到Google格式响应中的图片数据，正在转换为Markdown..."
-            );
-            const imagePart = candidate.content.parts[imagePartIndex];
-            const image = imagePart.inlineData;
-
-            const markdownTextPart = {
-              text: `![Generated Image](data:${image.mimeType};base64,${image.data})`,
-            };
-
-            candidate.content.parts[imagePartIndex] = markdownTextPart;
-            needsReserialization = true;
-          }
-        }
-
-        if (needsReserialization) {
-          fullBody = JSON.stringify(parsedBody); 
-        }
-      } catch (e) {
-        this.logger.warn(
-          `[Proxy] 响应体不是有效的JSON，或在处理图片时出错: ${e.message}`
-        );
-      }
-
-      try {
         const fullResponse = JSON.parse(fullBody);
         const finishReason =
           fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
