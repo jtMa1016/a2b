@@ -528,7 +528,7 @@ class BrowserManager {
     
     if (!this.page || this.page.isClosed()) return;
 
-    this.logger.info('[Browser] (后台任务) 唤醒守护进程已启动 (Target: .interaction-modal p)');
+    this.logger.info('[Browser] (后台任务) 唤醒守护进程已启动');
 
     // 2. 无限循环守护
     while (this.page && !this.page.isClosed()) {
@@ -1464,9 +1464,17 @@ async processModelListRequest(req, res) {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
-    const connectionMaintainer = setInterval(() => {
-      if (!res.writableEnded) res.write(": keep-alive\n\n");
-    }, 3000);
+    
+// ================= [修改开始] =================
+  // 原代码: res.write(": keep-alive\n\n");
+  // 修改为: 使用 _getKeepAliveChunk(req) 发送符合协议格式的“空数据包”
+  // 这能骗过客户端，让它以为连接仍然活跃且正在传输数据
+  const connectionMaintainer = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(this._getKeepAliveChunk(req));
+    }
+  }, 3000); // 每3秒发送一次
+  // ================= [修改结束] =================
 
     try {
       let lastMessage;
