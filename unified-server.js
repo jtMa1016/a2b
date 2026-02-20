@@ -377,107 +377,116 @@ class BrowserManager {
         }
       });
 
-      this.logger.info('[Browser] (步骤1/5) 准备点击 "Code" 按钮...');
-
-      // 等待按钮出现（但不死等它可点击，只等它存在于DOM中）
+// =====================================================================
+      // 检测是新版(需Remix)还是旧版(直接Code)
+      // =====================================================================
+      this.logger.info(' (步骤1/n) 正在检测当前 Google AI Studio UI 版本...');
+      
+      let isNewUI = false;
       try {
-        await this.page.waitForSelector('button:has-text("Code")', { state: 'attached', timeout: 15000 });
+        // 尝试寻找 Remix 按钮，最多等 5 秒
+        const remixBtn = this.page.locator('button:has-text("Remix")').first();
+        await remixBtn.waitFor({ state: 'visible', timeout: 5000 });
+        isNewUI = true;
+        this.logger.info('💡 检测到新版 UI (只读模式)，准备执行 Remix 流程...');
       } catch (e) {
-        this.logger.warn("等待 Code 按钮 DOM 出现超时，尝试直接点击...");
+        this.logger.info('💡 未检测到 Remix 按钮，按旧版 UI (直接编辑) 流程继续...');
       }
 
-      let codeClicked = false;
-      for (let i = 1; i <= 5; i++) {
-        try {
-          this.logger.info(`  [尝试 ${i}/5] 正在尝试点击 "Code" 按钮...`);
-
-          // --- 仅使用 Playwright 强制点击 ---
-          const codeBtn = this.page.locator('button:text("Code")').first();
-          if ((await codeBtn.count()) > 0) {
-              await codeBtn.click({ force: true, timeout: 5000 });
-              this.logger.info("  ✅ 'Code' 按钮点击成功！");
-              codeClicked = true;
-              break;
-          } else {
-              throw new Error("找不到 Code 按钮元素");
-          }
-        } catch (error) {
-          this.logger.warn(
-            `  [尝试 ${i}/5] 点击异常: ${error.message.split("\n")[0]}，正在清理环境重试...`
-          );
-          
-          // 失败处理：清理环境
-          await this.page.evaluate(() => {
-            document
-              .querySelectorAll(".cdk-overlay-backdrop, .cdk-overlay-container")
-              .forEach((e) => e.remove());
-          });
-          await this.page.waitForTimeout(1000);
-
-          if (i === 5) {
-            this.logger.error(
-              "❌ [严重错误] 前置检查已通过，但仍无法点击按钮，可能是 Google UI 变更。"
-            );
-            
-            // 尝试截图
-            try {
-              const screenshotPath = path.join(
-                __dirname,
-                "debug_failure_ui.png"
-              );
-              await this.page.screenshot({
-                path: screenshotPath,
-                fullPage: true,
-              });
-              this.logger.info(`📷 调试截图已保存: ${screenshotPath}`);
-            } catch (screenshotError) {}
-
-            throw new Error("UI 交互失败：找不到 Code 按钮。");
-          }
-        }
-      }
-
-      this.logger.info(
-        '[Browser] (步骤2/5) "Code" 按钮点击成功，等待编辑器变为可见...'
-      );
-      const editorContainerLocator = this.page
-        .locator("div.monaco-editor")
-        .first();
-      await editorContainerLocator.waitFor({
-        state: "visible",
-        timeout: 60000,
-      });
-
-      this.logger.info(
-        "[Browser] (清场 #2) 准备点击编辑器，再次强行移除所有可能的遮罩层..."
-      );
-      await this.page.evaluate(() => {
-        const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-        if (overlays.length > 0) {
-          console.log(
-            `[ProxyClient] (内部JS) 发现并移除了 ${overlays.length} 个新出现的遮罩层。`
-          );
-          overlays.forEach((el) => el.remove());
-        }
-      });
-      await this.page.waitForTimeout(250);
-
-      this.logger.info("[Browser] (步骤3/5) 编辑器已显示，聚焦并粘贴脚本...");
-      await editorContainerLocator.click({ force: true, timeout: 30000 });
-
-      await this.page.evaluate(
-        (text) => navigator.clipboard.writeText(text),
-        buildScriptContent
-      );
       const isMac = os.platform() === "darwin";
       const pasteKey = isMac ? "Meta+V" : "Control+V";
-      await this.page.keyboard.press(pasteKey);
-      this.logger.info("[Browser] (步骤4/5) 脚本已粘贴。");
-      this.logger.info(
-        '[Browser] (步骤5/5) 正在点击 "Preview" 按钮以使脚本生效...'
-      );
-      await this.page.locator('button:text("Preview")').first().click({ force: true });
-      this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
+      const selectAllKey = isMac ? "Meta+A" : "Control+A";
+      const saveKey = isMac ? "Meta+S" : "Control+S";
+
+      if (isNewUI) {
+        // -------------------------------------------------------------------
+        // ▶▶▶ 新版 UI 流程 (Remix -> 跳转 -> 修改 ts -> 修改 html -> 保存预览)
+        // -------------------------------------------------------------------
+        const remixBtn = this.page.locator('button:has-text("Remix")').first();
+        await remixBtn.click({ force: true });
+        this.logger.info(' 已点击 "Remix"，等待弹窗...');
+
+        // 等待并点击 Apply 按钮
+        const applyBtn = this.page.locator('button:has-text("Apply")').first();
+        await applyBtn.waitFor({ state: 'visible', timeout: 10000 });
+        // 注：这里可以直接点击 Apply，系统会自动生成默认 Name，无需强行覆写
+        await applyBtn.click({ force: true });
+        this.logger.info(' 已点击 "Apply"，等待生成个人副本并跳转...');
+
+        // 等待 URL 变成个人的 App ID 格式: /apps/xxxxxx...
+        await this.page.waitForURL(/\/apps\/+/, { timeout: 45000 });
+        await this.page.waitForLoadState('domcontentloaded');
+        await this.page.waitForTimeout(3000); // 缓冲等待DOM彻底渲染
+        this.logger.info(' 副本跳转完成！准备注入代码...');
+
+        // 点击 Code 按钮展开侧边栏
+        await this.page.locator('button:has-text("Code")').first().click({ force: true });
+        await this.page.waitForTimeout(1500);
+
+        // 1. 修改 index.ts
+        this.logger.info(' 正在配置 index.ts...');
+        await this.page.getByText('index.ts', { exact: true }).first().click({ force: true });
+        await this.page.waitForTimeout(500);
+        
+        let editorContainer = this.page.locator("div.monaco-editor").first();
+        await editorContainer.click({ force: true });
+        await this.page.keyboard.press(selectAllKey);
+        await this.page.keyboard.press("Backspace");
+        await this.page.evaluate((text) => navigator.clipboard.writeText(text), buildScriptContent);
+        await this.page.keyboard.press(pasteKey);
+
+        // 2. 修改 index.html
+        this.logger.info(' 正在配置 index.html...');
+        await this.page.getByText('index.html', { exact: true }).first().click({ force: true });
+        await this.page.waitForTimeout(500);
+
+        editorContainer = this.page.locator("div.monaco-editor").first();
+        await editorContainer.click({ force: true });
+        await this.page.keyboard.press(selectAllKey);
+        await this.page.keyboard.press("Backspace");
+        const htmlTemplate = `<!DOCTYPE html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>App</title>\n  </head>\n  <body>\n    <div id="app"></div>\n    <script type="module" src="/index.ts"></script>\n  </body>\n</html>`;
+        await this.page.evaluate((text) => navigator.clipboard.writeText(text), htmlTemplate);
+        await this.page.keyboard.press(pasteKey);
+
+        // 3. Ctrl+S 保存
+        this.logger.info(' 正在执行 Ctrl+S 保存项目...');
+        await this.page.keyboard.press(saveKey);
+        await this.page.waitForTimeout(1500); // 等待保存生效
+
+        // 4. 点击 Preview 启动
+        this.logger.info(' 正在点击 "Preview" 启动代理系统...');
+        await this.page.locator('button:has-text("Preview")').first().click({ force: true });
+
+      } else {
+        // -------------------------------------------------------------------
+        // ▶▶▶ 旧版 UI 流程 (直接点击 Code -> 粘贴 -> Preview)
+        // -------------------------------------------------------------------
+        this.logger.info(' 正在点击 "Code" 按钮...');
+        const codeBtn = this.page.locator('button:text("Code")').first();
+        await codeBtn.click({ force: true, timeout: 5000 });
+
+        const editorContainerLocator = this.page.locator("div.monaco-editor").first();
+        await editorContainerLocator.waitFor({ state: "visible", timeout: 30000 });
+        
+        // 强行清理可能的遮罩
+        await this.page.evaluate(() => {
+          document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
+        });
+
+        this.logger.info(" 编辑器已显示，聚焦并粘贴脚本...");
+        await editorContainerLocator.click({ force: true, timeout: 10000 });
+        
+        await this.page.keyboard.press(selectAllKey);
+        await this.page.keyboard.press("Backspace");
+        await this.page.evaluate((text) => navigator.clipboard.writeText(text), buildScriptContent);
+        await this.page.keyboard.press(pasteKey);
+        
+        this.logger.info(' 正在点击 "Preview" 按钮以使脚本生效...');
+        await this.page.locator('button:text("Preview")').first().click({ force: true });
+      }
+
+      this.logger.info(" ✅ UI交互完成，脚本已开始运行。");
+      // =====================================================================
       this.currentAuthIndex = authIndex;
       this.logger.info("==================================================");
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
