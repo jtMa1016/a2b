@@ -378,13 +378,34 @@ class BrowserManager {
       });
 
 // =====================================================================
-      // 检测是新版(需Remix)还是旧版(直接Code)
+      // 辅助函数：安全扫描并点击页面上【真正可见】的元素 (规避框架隐藏DOM陷阱)
+      const safeClickVisible = async (locatorDesc, locatorText) => {
+        const locators = this.page.locator(locatorText);
+        // 先宽容等待元素挂载到 DOM
+        await locators.first().waitFor({ state: 'attached', timeout: 10000 }).catch(() => {});
+        const count = await locators.count();
+        
+        for (let i = 0; i < count; i++) {
+            // Playwright 会检查元素是否有真实的宽高并且未被隐藏
+            if (await locators.nth(i).isVisible()) {
+                await locators.nth(i).click({ force: true });
+                return true;
+            }
+        }
+        // 兜底逻辑：如果全判定为不可见，强行点第一个碰碰运气
+        if (count > 0) {
+            this.logger.warn(` ⚠️ 找不到严格可见的 ${locatorDesc}，尝试强行点击...`);
+            await locators.first().click({ force: true });
+            return true;
+        }
+        throw new Error(`UI 错误：找不到任何匹配的元素 -> ${locatorDesc}`);
+      };
       // =====================================================================
+      
       this.logger.info(' (步骤1/n) 正在检测当前 Google AI Studio UI 版本...');
       
       let isNewUI = false;
       try {
-        // 尝试寻找 Remix 按钮，最多等 5 秒
         const remixBtn = this.page.locator('button:has-text("Remix")').first();
         await remixBtn.waitFor({ state: 'visible', timeout: 5000 });
         isNewUI = true;
@@ -400,33 +421,30 @@ class BrowserManager {
 
       if (isNewUI) {
         // -------------------------------------------------------------------
-        // ▶▶▶ 新版 UI 流程 (Remix -> 跳转 -> 修改 ts -> 修改 html -> 保存预览)
+        // ▶▶▶ 新版 UI 流程
         // -------------------------------------------------------------------
-        const remixBtn = this.page.locator('button:has-text("Remix")').first();
-        await remixBtn.click({ force: true });
+        await safeClickVisible('Remix按钮', 'button:has-text("Remix")');
         this.logger.info(' 已点击 "Remix"，等待弹窗...');
 
-        // 等待并点击 Apply 按钮
         const applyBtn = this.page.locator('button:has-text("Apply")').first();
         await applyBtn.waitFor({ state: 'visible', timeout: 10000 });
-        // 注：这里可以直接点击 Apply，系统会自动生成默认 Name，无需强行覆写
         await applyBtn.click({ force: true });
         this.logger.info(' 已点击 "Apply"，等待生成个人副本并跳转...');
 
-        // 等待 URL 变成个人的 App ID 格式: /apps/xxxxxx...
         await this.page.waitForURL(/\/apps\/+/, { timeout: 45000 });
         await this.page.waitForLoadState('domcontentloaded');
-        await this.page.waitForTimeout(3000); // 缓冲等待DOM彻底渲染
+        await this.page.waitForTimeout(3000); 
         this.logger.info(' 副本跳转完成！准备注入代码...');
 
-        // 点击 Code 按钮展开侧边栏
-        await this.page.locator('button:has-text("Code")').first().click({ force: true });
-        await this.page.waitForTimeout(1500);
+        // 展开 Code 侧边栏，并必须等待动画结束
+        this.logger.info(' 正在展开 Code 侧边栏...');
+        await safeClickVisible('Code按钮', 'button:has-text("Code")');
+        await this.page.waitForTimeout(2500); // 【关键修复】给 Angular 侧边栏滑出动画充足的时间
 
         // 1. 修改 index.ts
         this.logger.info(' 正在配置 index.ts...');
-        await this.page.getByText('index.ts', { exact: true }).first().click({ force: true });
-        await this.page.waitForTimeout(500);
+        await safeClickVisible('index.ts文件', 'span.node-name:has-text("index.ts")');
+        await this.page.waitForTimeout(1000); // 等待 Monaco Editor 切换文件
         
         let editorContainer = this.page.locator("div.monaco-editor").first();
         await editorContainer.click({ force: true });
@@ -437,8 +455,8 @@ class BrowserManager {
 
         // 2. 修改 index.html
         this.logger.info(' 正在配置 index.html...');
-        await this.page.getByText('index.html', { exact: true }).first().click({ force: true });
-        await this.page.waitForTimeout(500);
+        await safeClickVisible('index.html文件', 'span.node-name:has-text("index.html")');
+        await this.page.waitForTimeout(1000);
 
         editorContainer = this.page.locator("div.monaco-editor").first();
         await editorContainer.click({ force: true });
@@ -451,24 +469,22 @@ class BrowserManager {
         // 3. Ctrl+S 保存
         this.logger.info(' 正在执行 Ctrl+S 保存项目...');
         await this.page.keyboard.press(saveKey);
-        await this.page.waitForTimeout(1500); // 等待保存生效
+        await this.page.waitForTimeout(1500); 
 
         // 4. 点击 Preview 启动
         this.logger.info(' 正在点击 "Preview" 启动代理系统...');
-        await this.page.locator('button:has-text("Preview")').first().click({ force: true });
+        await safeClickVisible('Preview按钮', 'button:has-text("Preview")');
 
       } else {
         // -------------------------------------------------------------------
-        // ▶▶▶ 旧版 UI 流程 (直接点击 Code -> 粘贴 -> Preview)
+        // ▶▶▶ 旧版 UI 流程
         // -------------------------------------------------------------------
         this.logger.info(' 正在点击 "Code" 按钮...');
-        const codeBtn = this.page.locator('button:text("Code")').first();
-        await codeBtn.click({ force: true, timeout: 5000 });
+        await safeClickVisible('Code按钮', 'button:has-text("Code")');
 
         const editorContainerLocator = this.page.locator("div.monaco-editor").first();
         await editorContainerLocator.waitFor({ state: "visible", timeout: 30000 });
         
-        // 强行清理可能的遮罩
         await this.page.evaluate(() => {
           document.querySelectorAll("div.cdk-overlay-backdrop").forEach(el => el.remove());
         });
@@ -482,7 +498,7 @@ class BrowserManager {
         await this.page.keyboard.press(pasteKey);
         
         this.logger.info(' 正在点击 "Preview" 按钮以使脚本生效...');
-        await this.page.locator('button:text("Preview")').first().click({ force: true });
+        await safeClickVisible('Preview按钮', 'button:has-text("Preview")');
       }
 
       this.logger.info(" ✅ UI交互完成，脚本已开始运行。");
